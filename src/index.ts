@@ -1,11 +1,8 @@
 import "dotenv/config";
 import { connectDB, disconnectDB } from "./db.js";
-import { extractReceipt } from "./extractReceipt.js";
-import { Purchase } from "./models/Purchase.js";
-import { Item } from "./models/Item.js";
+import { processAndSave } from "./processAndSave.js";
 import type { ExtractedReceipt } from "./types.js";
 
-/** Imprime um resumo legível da compra no console. */
 function printSummary(receipt: ExtractedReceipt): void {
   console.log("\n──────────────── RESUMO DA COMPRA ────────────────");
   console.log(`Loja:  ${receipt.storeName}`);
@@ -42,29 +39,9 @@ async function main(): Promise<void> {
 
   try {
     console.log(`Extraindo dados do cupom: ${imagePath}`);
-    const receipt = await extractReceipt(imagePath);
-
-    // Cria a compra primeiro para obter o _id que os itens vão referenciar.
-    const purchase = await Purchase.create({
-      storeName: receipt.storeName,
-      storeCnpj: receipt.storeCnpj ?? undefined,
-      purchaseDate: receipt.purchaseDate ? new Date(receipt.purchaseDate) : new Date(),
-      totalAmount: receipt.totalAmount,
-      imagePath,
-      items: [],
-    });
-
-    // Cria os itens vinculados à compra.
-    const items = await Item.insertMany(
-      receipt.items.map((item) => ({ ...item, purchaseId: purchase._id })),
-    );
-
-    // Atualiza a compra com as referências aos itens.
-    purchase.items = items.map((item) => item._id);
-    await purchase.save();
-
-    printSummary(receipt);
-    console.log(`✓ Persistido: compra ${purchase._id} com ${items.length} itens.`);
+    const result = await processAndSave(imagePath);
+    printSummary(result.receipt);
+    console.log(`✓ Persistido: compra ${result.purchaseId} com ${result.itemCount} itens.`);
   } finally {
     await disconnectDB();
   }
