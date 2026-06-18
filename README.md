@@ -46,6 +46,27 @@ Formatos de imagem suportados: `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`.
 O comando lê a imagem, envia ao Claude, valida o JSON retornado, persiste a compra
 e seus itens no MongoDB e imprime um resumo no console.
 
+## Relatório mensal (API HTTP)
+
+Suba o servidor e consulte o relatório consolidado de um mês:
+
+```bash
+npm run serve
+curl http://localhost:3000/reports/2026-06
+```
+
+`GET /reports/:month` (mês no formato `YYYY-MM`) retorna em JSON:
+
+- `totalSpent` — total gasto no mês;
+- `purchaseCount` / `averageTicket` — nº de compras (cupons) e ticket médio;
+- `itemCount` — total de itens comprados;
+- `topStore` — estabelecimento com maior gasto;
+- `storeRanking` — ranking de lojas (gasto, nº de visitas, ticket médio);
+- `spendingByCategory` — gasto por categoria de produto (valor, % e nº de itens).
+
+Mês fora do formato `YYYY-MM` retorna `400`. Mês sem compras retorna o relatório
+com totais zerados.
+
 ## Build
 
 ```bash
