@@ -218,8 +218,26 @@ O `@langchain/anthropic@0.3.34` é anterior ao modelo `claude-sonnet-4-6` e inje
 ### Vulnerabilidades de dependências
 `npm install` reporta vulnerabilidades transitivas (via `langchain`). Não tratadas para evitar `npm audit fix --force` (risco de breaking changes).
 
+### Relatório mensal (`src/monthlyReport.ts` + `GET /reports/:month`)
+
+Endpoint HTTP que consolida as compras de um mês (`YYYY-MM`) via *aggregation
+pipelines* do Mongoose:
+
+- **Nível de compra** (`Purchase`): total gasto, nº de cupons, ticket médio e
+  ranking de estabelecimentos (gasto, visitas, ticket médio por loja).
+- **Nível de item** (`Purchase` → `$lookup` em `items`): gasto por categoria de
+  produto, com valor, percentual (sobre a soma dos itens) e contagem.
+
+Filtro por `purchaseDate ∈ [início do mês, início do mês seguinte)` (intervalo
+calculado em UTC por `getMonthRange`). Mês inválido → `InvalidMonthError` →
+HTTP 400. Mês sem compras → totais zerados e `topStore: null` (não quebra).
+
+Campos do `MonthlyReport`: `month`, `range`, `totalSpent`, `purchaseCount`,
+`averageTicket`, `itemCount`, `topStore`, `storeRanking`, `spendingByCategory`.
+
 ### Não implementado nesta versão
-- Camada de análise (inflação, comparação de preços, padrões).
+- Camada de análise avançada: comparação mês a mês (inflação pessoal), top
+  produtos, comparação de preços entre estabelecimentos, padrões de consumo.
 - Deduplicação de compras (reprocessar a mesma imagem cria duplicatas).
 - Testes automatizados.
 - Normalização de nomes de produto entre estabelecimentos (necessária para comparação de preços).

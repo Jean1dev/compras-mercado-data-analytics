@@ -5,6 +5,7 @@ import { join, extname } from "node:path";
 import Fastify from "fastify";
 import { connectDB } from "./db.js";
 import { processAndSave } from "./processAndSave.js";
+import { generateMonthlyReport, InvalidMonthError } from "./monthlyReport.js";
 
 const app = Fastify({ logger: true });
 
@@ -46,6 +47,20 @@ app.post("/receipts", async (request, reply) => {
     });
   } finally {
     await unlink(tempPath).catch(() => {});
+  }
+});
+
+app.get("/reports/:month", async (request, reply) => {
+  const { month } = request.params as { month: string };
+
+  try {
+    const report = await generateMonthlyReport(month);
+    return reply.send(report);
+  } catch (err) {
+    if (err instanceof InvalidMonthError) {
+      return reply.status(400).send({ error: err.message });
+    }
+    throw err;
   }
 });
 
