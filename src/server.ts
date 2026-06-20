@@ -1,13 +1,19 @@
+// Sentry precisa ser inicializado antes de qualquer outro módulo.
+import "./instrument.js";
 import "dotenv/config";
 import { writeFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, extname } from "node:path";
+import * as Sentry from "@sentry/node";
 import Fastify from "fastify";
 import { connectDB } from "./db.js";
 import { processAndSave } from "./processAndSave.js";
 import { generateMonthlyReport, InvalidMonthError } from "./monthlyReport.js";
 
 const app = Fastify({ logger: true });
+
+// Registra o handler de erros do Sentry para capturar exceções das rotas.
+Sentry.setupFastifyErrorHandler(app);
 
 app.post("/receipts", async (request, reply) => {
   const body = request.body as Record<string, unknown>;
@@ -76,7 +82,9 @@ async function start(): Promise<void> {
   await app.listen({ port, host: "0.0.0.0" });
 }
 
-start().catch((err) => {
+start().catch(async (err) => {
   console.error("Erro ao iniciar servidor:", err);
+  Sentry.captureException(err);
+  await Sentry.flush(2000);
   process.exit(1);
 });
