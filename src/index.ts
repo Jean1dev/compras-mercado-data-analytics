@@ -1,4 +1,7 @@
+// Sentry precisa ser inicializado antes de qualquer outro módulo.
+import "./instrument.js";
 import "dotenv/config";
+import * as Sentry from "@sentry/node";
 import { connectDB, disconnectDB } from "./db.js";
 import { processAndSave } from "./processAndSave.js";
 import type { ExtractedReceipt } from "./types.js";
@@ -47,7 +50,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error("\n✗ Erro:", err instanceof Error ? err.message : err);
+  Sentry.captureException(err);
+  await Sentry.flush(2000);
   process.exitCode = 1;
 });
