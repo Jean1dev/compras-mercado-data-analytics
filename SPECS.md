@@ -218,6 +218,35 @@ O `@langchain/anthropic@0.3.34` é anterior ao modelo `claude-sonnet-4-6` e inje
 ### Vulnerabilidades de dependências
 `npm install` reporta vulnerabilidades transitivas (via `langchain`). Não tratadas para evitar `npm audit fix --force` (risco de breaking changes).
 
+### Processamento assíncrono de cupom (`POST /receipts`)
+
+O endpoint não processa a requisição de forma síncrona: ele valida a entrada,
+dispara o processamento em background e responde imediatamente.
+
+**Corpo da requisição:**
+```json
+{ "imageUrl": "https://...", "webhookUrl": "https://..." }
+```
+Ambos os campos são obrigatórios e devem ser URLs válidas (`new URL(...)`
+sem lançar); falha de validação → `400` síncrono, sem iniciar o job.
+
+**Resposta imediata:** `202 Accepted` com `{ "jobId": "<uuid>", "status": "accepted" }`
+(`jobId` gerado via `crypto.randomUUID()`).
+
+**Job em background** (`processReceiptJob`, em `server.ts`):
+1. Baixa a imagem de `imageUrl` para um arquivo temporário nomeado com o `jobId`.
+2. `processAndSave(tempPath)` — mesmo fluxo de extração + persistência do CLI.
+3. Remove o arquivo temporário (`finally`, best-effort).
+4. Notifica o `webhookUrl` via `sendWebhook` (`src/webhook.ts`), com `POST` JSON:
+   - sucesso: `{ jobId, status: "completed", purchaseId, itemCount, receipt }`
+   - falha (download, extração ou persistência): `{ jobId, status: "failed", error }`
+
+Erros no job (download, extração, persistência) são capturados, reportados ao
+Sentry e convertidos em webhook de falha — nunca viram uma exceção não
+tratada no processo. Falha ao **entregar** o webhook (rede, endpoint fora do
+ar, resposta não-2xx) é logada e reportada ao Sentry, mas não é reenviada
+(sem retry nesta versão).
+
 ### Relatório mensal (`src/monthlyReport.ts` + `GET /reports/:month`)
 
 Endpoint HTTP que consolida as compras de um mês (`YYYY-MM`) via *aggregation
@@ -241,7 +270,9 @@ Campos do `MonthlyReport`: `month`, `range`, `totalSpent`, `purchaseCount`,
 - Deduplicação de compras (reprocessar a mesma imagem cria duplicatas).
 - Testes automatizados.
 - Normalização de nomes de produto entre estabelecimentos (necessária para comparação de preços).
-- API/serviço (atualmente apenas CLI).
+- Persistência do status do job (`jobId` não é gravado em lugar algum; se o
+  processo reiniciar no meio de um job, o resultado se perde).
+- Retry/backoff na entrega do webhook.
 
 ---
 
@@ -263,7 +294,11 @@ Campos do `MonthlyReport`: `month`, `range`, `totalSpent`, `purchaseCount`,
 /
 ├── src/
 │   ├── index.ts            # entry point — orquestra o fluxo
+│   ├── server.ts           # servidor Fastify — POST /receipts (assíncrono), GET /reports/:month
+│   ├── webhook.ts          # envio do POST de callback (sendWebhook)
 │   ├── extractReceipt.ts   # lê imagem, chama Claude via LangChain, valida o JSON
+│   ├── processAndSave.ts   # extrai + persiste (Purchase + Item)
+│   ├── monthlyReport.ts    # agregação do relatório mensal
 │   ├── models/
 │   │   ├── Purchase.ts     # model Mongoose (compra)
 │   │   └── Item.ts         # model Mongoose (produto)

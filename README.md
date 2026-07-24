@@ -46,6 +46,33 @@ Formatos de imagem suportados: `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`.
 O comando lê a imagem, envia ao Claude, valida o JSON retornado, persiste a compra
 e seus itens no MongoDB e imprime um resumo no console.
 
+## Processamento de cupom via API HTTP (assíncrono + webhook)
+
+Suba o servidor e envie a imagem do cupom:
+
+```bash
+npm run serve
+curl -X POST http://localhost:3000/receipts \
+  -H "Content-Type: application/json" \
+  -d '{"imageUrl": "https://exemplo.com/cupom.jpg", "webhookUrl": "https://exemplo.com/callback"}'
+```
+
+`POST /receipts` responde imediatamente com `202 Accepted` e `{ "jobId": "...", "status": "accepted" }`,
+sem esperar o processamento terminar. O download da imagem, a extração via Claude e a persistência
+no MongoDB acontecem em background; ao final, o servidor faz uma chamada `POST` para o `webhookUrl`
+informado, com um dos formatos:
+
+```jsonc
+// sucesso
+{ "jobId": "...", "status": "completed", "purchaseId": "...", "itemCount": 10, "receipt": { /* ExtractedReceipt */ } }
+
+// falha
+{ "jobId": "...", "status": "failed", "error": "mensagem do erro" }
+```
+
+Campos obrigatórios do corpo: `imageUrl` e `webhookUrl` (ambos devem ser URLs válidas). Requisição
+inválida retorna `400` de forma síncrona, antes de qualquer processamento.
+
 ## Relatório mensal (API HTTP)
 
 Suba o servidor e consulte o relatório consolidado de um mês:

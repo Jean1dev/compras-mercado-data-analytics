@@ -4,41 +4,37 @@ import "dotenv/config";
 import { writeFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, extname } from "node:path";
+import { randomUUID } from "node:crypto";
 import * as Sentry from "@sentry/node";
 import Fastify from "fastify";
 import { connectDB } from "./db.js";
 import { processAndSave } from "./processAndSave.js";
 import { generateMonthlyReport, InvalidMonthError } from "./monthlyReport.js";
+import { sendWebhook } from "./webhook.js";
 
 const app = Fastify({ logger: true });
 
 // Registra o handler de erros do Sentry para capturar exceções das rotas.
 Sentry.setupFastifyErrorHandler(app);
 
-app.post("/receipts", async (request, reply) => {
-  const body = request.body as Record<string, unknown>;
-  const imageUrl = body?.imageUrl;
-
-  if (typeof imageUrl !== "string" || !imageUrl) {
-    return reply.status(400).send({ error: "imageUrl is required" });
-  }
-
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(imageUrl);
-  } catch {
-    return reply.status(400).send({ error: "imageUrl is not a valid URL" });
-  }
-
-  const ext = extname(parsedUrl.pathname) || ".jpg";
-  const tempPath = join(tmpdir(), `receipt_${Date.now()}${ext}`);
+/**
+ * Baixa a imagem, extrai e persiste os dados do cupom, e notifica o
+ * resultado via webhook. Roda em background, desacoplado da resposta HTTP
+ * já enviada ao cliente — erros aqui viram um webhook de falha, nunca uma
+ * exceção não tratada.
+ */
+async function processReceiptJob(
+  jobId: string,
+  imageUrl: string,
+  webhookUrl: string,
+): Promise<void> {
+  const ext = extname(new URL(imageUrl).pathname) || ".jpg";
+  const tempPath = join(tmpdir(), `receipt_${jobId}${ext}`);
 
   try {
     const response = await fetch(imageUrl);
     if (!response.ok) {
-      return reply
-        .status(400)
-        .send({ error: `Falha ao baixar imagem: ${response.status} ${response.statusText}` });
+      throw new Error(`Falha ao baixar imagem: ${response.status} ${response.statusText}`);
     }
 
     const buffer = await response.arrayBuffer();
@@ -46,14 +42,56 @@ app.post("/receipts", async (request, reply) => {
 
     const result = await processAndSave(tempPath);
 
-    return reply.send({
+    await sendWebhook(webhookUrl, {
+      jobId,
+      status: "completed",
       purchaseId: result.purchaseId,
       itemCount: result.itemCount,
       receipt: result.receipt,
     });
+  } catch (err) {
+    console.error(`✗ Erro ao processar job ${jobId}:`, err);
+    Sentry.captureException(err);
+    await sendWebhook(webhookUrl, {
+      jobId,
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
   } finally {
     await unlink(tempPath).catch(() => {});
   }
+}
+
+app.post("/receipts", async (request, reply) => {
+  const body = request.body as Record<string, unknown>;
+  const imageUrl = body?.imageUrl;
+  const webhookUrl = body?.webhookUrl;
+
+  if (typeof imageUrl !== "string" || !imageUrl) {
+    return reply.status(400).send({ error: "imageUrl is required" });
+  }
+
+  if (typeof webhookUrl !== "string" || !webhookUrl) {
+    return reply.status(400).send({ error: "webhookUrl is required" });
+  }
+
+  try {
+    new URL(imageUrl);
+  } catch {
+    return reply.status(400).send({ error: "imageUrl is not a valid URL" });
+  }
+
+  try {
+    new URL(webhookUrl);
+  } catch {
+    return reply.status(400).send({ error: "webhookUrl is not a valid URL" });
+  }
+
+  const jobId = randomUUID();
+
+  void processReceiptJob(jobId, imageUrl, webhookUrl);
+
+  return reply.status(202).send({ jobId, status: "accepted" });
 });
 
 app.get("/reports/:month", async (request, reply) => {
