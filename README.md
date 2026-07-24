@@ -59,19 +59,30 @@ curl -X POST http://localhost:3000/receipts \
 
 `POST /receipts` responde imediatamente com `202 Accepted` e `{ "jobId": "...", "status": "accepted" }`,
 sem esperar o processamento terminar. O download da imagem, a extração via Claude e a persistência
-no MongoDB acontecem em background; ao final, o servidor faz uma chamada `POST` para o `webhookUrl`
-informado, com um dos formatos:
+no MongoDB acontecem em background; à medida que os dados ficam disponíveis, o servidor faz chamadas
+`POST` para o `webhookUrl` informado, uma por evento, sempre com `jobId`:
 
 ```jsonc
-// sucesso
-{ "jobId": "...", "status": "completed", "purchaseId": "...", "itemCount": 10, "receipt": { /* ExtractedReceipt */ } }
+// nome do estabelecimento
+{ "jobId": "...", "event": "storeName", "storeName": "Mercado Exemplo" }
 
-// falha
-{ "jobId": "...", "status": "failed", "error": "mensagem do erro" }
+// valor total da compra
+{ "jobId": "...", "event": "totalAmount", "totalAmount": 123.45 }
+
+// quantidade total de itens
+{ "jobId": "...", "event": "itemCount", "itemCount": 10 }
+
+// conclusão do job, com o resultado completo
+{ "jobId": "...", "event": "completed", "purchaseId": "...", "itemCount": 10, "receipt": { /* ExtractedReceipt */ } }
+
+// falha em qualquer etapa do processamento
+{ "jobId": "...", "event": "failed", "error": "mensagem do erro" }
 ```
 
-Campos obrigatórios do corpo: `imageUrl` e `webhookUrl` (ambos devem ser URLs válidas). Requisição
-inválida retorna `400` de forma síncrona, antes de qualquer processamento.
+Em caso de sucesso, os eventos `storeName`, `totalAmount` e `itemCount` são enviados (nessa ordem),
+seguidos do `completed`. Em caso de erro, apenas o `failed` é enviado. Campos obrigatórios do corpo
+da requisição: `imageUrl` e `webhookUrl` (ambos devem ser URLs válidas). Requisição inválida retorna
+`400` de forma síncrona, antes de qualquer processamento.
 
 ## Relatório mensal (API HTTP)
 

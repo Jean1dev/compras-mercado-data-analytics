@@ -44,7 +44,22 @@ async function processReceiptJob(
 
     await sendWebhook(webhookUrl, {
       jobId,
-      status: "completed",
+      event: "storeName",
+      storeName: result.receipt.storeName,
+    });
+    await sendWebhook(webhookUrl, {
+      jobId,
+      event: "totalAmount",
+      totalAmount: result.receipt.totalAmount,
+    });
+    await sendWebhook(webhookUrl, {
+      jobId,
+      event: "itemCount",
+      itemCount: result.itemCount,
+    });
+    await sendWebhook(webhookUrl, {
+      jobId,
+      event: "completed",
       purchaseId: result.purchaseId,
       itemCount: result.itemCount,
       receipt: result.receipt,
@@ -54,7 +69,7 @@ async function processReceiptJob(
     Sentry.captureException(err);
     await sendWebhook(webhookUrl, {
       jobId,
-      status: "failed",
+      event: "failed",
       error: err instanceof Error ? err.message : String(err),
     });
   } finally {

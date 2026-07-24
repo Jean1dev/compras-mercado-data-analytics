@@ -4,14 +4,29 @@ import type { ExtractedReceipt } from "./types.js";
 export type WebhookPayload =
   | {
       jobId: string;
-      status: "completed";
+      event: "storeName";
+      storeName: string;
+    }
+  | {
+      jobId: string;
+      event: "totalAmount";
+      totalAmount: number;
+    }
+  | {
+      jobId: string;
+      event: "itemCount";
+      itemCount: number;
+    }
+  | {
+      jobId: string;
+      event: "completed";
       purchaseId: string;
       itemCount: number;
       receipt: ExtractedReceipt;
     }
   | {
       jobId: string;
-      status: "failed";
+      event: "failed";
       error: string;
     };
 

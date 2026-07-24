@@ -237,15 +237,27 @@ sem lançar); falha de validação → `400` síncrono, sem iniciar o job.
 1. Baixa a imagem de `imageUrl` para um arquivo temporário nomeado com o `jobId`.
 2. `processAndSave(tempPath)` — mesmo fluxo de extração + persistência do CLI.
 3. Remove o arquivo temporário (`finally`, best-effort).
-4. Notifica o `webhookUrl` via `sendWebhook` (`src/webhook.ts`), com `POST` JSON:
-   - sucesso: `{ jobId, status: "completed", purchaseId, itemCount, receipt }`
-   - falha (download, extração ou persistência): `{ jobId, status: "failed", error }`
+4. Notifica o `webhookUrl` via `sendWebhook` (`src/webhook.ts`), com uma chamada
+   `POST` JSON por evento — cada payload traz `jobId` e um discriminante `event`:
+   - sucesso, nessa ordem:
+     1. `{ jobId, event: "storeName", storeName }`
+     2. `{ jobId, event: "totalAmount", totalAmount }`
+     3. `{ jobId, event: "itemCount", itemCount }`
+     4. `{ jobId, event: "completed", purchaseId, itemCount, receipt }`
+   - falha (download, extração ou persistência): apenas
+     `{ jobId, event: "failed", error }`
+
+Os três primeiros eventos de sucesso derivam do mesmo `ExtractedReceipt` já
+obtido — não há extração incremental de campo a campo; eles existem para dar
+ao consumidor do webhook acesso rápido a `storeName`/`totalAmount`/`itemCount`
+sem precisar esperar ou parsear o payload `completed` inteiro.
 
 Erros no job (download, extração, persistência) são capturados, reportados ao
-Sentry e convertidos em webhook de falha — nunca viram uma exceção não
-tratada no processo. Falha ao **entregar** o webhook (rede, endpoint fora do
-ar, resposta não-2xx) é logada e reportada ao Sentry, mas não é reenviada
-(sem retry nesta versão).
+Sentry e convertidos no webhook `failed` — nunca viram uma exceção não
+tratada no processo. Falha ao **entregar** qualquer um dos webhooks (rede,
+endpoint fora do ar, resposta não-2xx) é logada e reportada ao Sentry
+individualmente, mas não é reenviada nem interrompe o envio dos eventos
+seguintes (sem retry nesta versão).
 
 ### Relatório mensal (`src/monthlyReport.ts` + `GET /reports/:month`)
 
