@@ -140,7 +140,7 @@ Ambos os schemas usam `timestamps: true` → geram `createdAt` e `updatedAt`.
 | `storeCnpj` | String | Não | |
 | `purchaseDate` | Date | Sim | `new Date()` se não identificada |
 | `totalAmount` | Number | Sim | |
-| `imagePath` | String | Sim | caminho da imagem de origem |
+| `imagePaths` | String[] | Sim | caminhos das imagens da compra; `imagePath` permanece apenas para documentos legados |
 | `items` | [ObjectId → Item] | — | referências aos itens |
 | `createdAt` / `updatedAt` | Date | auto | |
 
@@ -225,19 +225,22 @@ dispara o processamento em background e responde imediatamente.
 
 **Corpo da requisição:**
 ```json
-{ "imageUrl": "https://...", "webhookUrl": "https://..." }
+{ "imageUrls": ["https://.../parte-1.jpg", "https://.../parte-2.jpg"], "webhookUrl": "https://..." }
 ```
-Ambos os campos são obrigatórios e devem ser URLs válidas (`new URL(...)`
-sem lançar); falha de validação → `400` síncrono, sem iniciar o job.
+`imageUrls` deve conter de 1 a 10 URLs válidas e `webhookUrl` deve ser uma URL
+válida (`new URL(...)` sem lançar); falha de validação → `400` síncrono,
+sem iniciar o job. O campo legado `imageUrl` pode substituir `imageUrls` para
+uma única imagem, mas os dois não podem ser enviados juntos.
 
 **Resposta imediata:** `202 Accepted` com `{ "jobId": "<uuid>", "status": "accepted" }`
 (`jobId` gerado via `crypto.randomUUID()`).
 
 **Job em background** (`processReceiptJob`, em `server.ts`):
-1. Baixa a imagem de `imageUrl` para um arquivo temporário nomeado com o `jobId`.
-2. `processAndSave(tempPath)` — mesmo fluxo de extração + persistência do CLI.
-3. Remove o arquivo temporário (`finally`, best-effort).
-4. Notifica o `webhookUrl` via `sendWebhook` (`src/webhook.ts`), com uma chamada
+1. Baixa de 1 a 10 imagens de `imageUrls`, na ordem recebida, para arquivos temporários nomeados com o `jobId`. O campo legado `imageUrl` continua aceito para uma imagem; enviar os dois campos retorna `400`.
+2. Envia todas as imagens juntas ao modelo, que as trata como partes da mesma compra, combina informações complementares e evita duplicar trechos sobrepostos.
+3. `processAndSave(tempPaths)` — persiste uma única compra com todos os itens extraídos.
+4. Remove todos os arquivos temporários (`finally`, best-effort).
+5. Notifica o `webhookUrl` via `sendWebhook` (`src/webhook.ts`), com uma chamada
    `POST` JSON por evento — cada payload traz `jobId` e um discriminante `event`:
    - sucesso, nessa ordem:
      1. `{ jobId, event: "storeName", storeName }`

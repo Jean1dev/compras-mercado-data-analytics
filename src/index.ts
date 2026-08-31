@@ -42,7 +42,7 @@ async function main(): Promise<void> {
 
   try {
     console.log(`Extraindo dados do cupom: ${imagePath}`);
-    const result = await processAndSave(imagePath);
+    const result = await processAndSave([imagePath]);
     printSummary(result.receipt);
     console.log(`✓ Persistido: compra ${result.purchaseId} com ${result.itemCount} itens.`);
   } finally {

@@ -10,6 +10,7 @@ import Fastify from "fastify";
 import { connectDB } from "./db.js";
 import { processAndSave } from "./processAndSave.js";
 import { generateMonthlyReport, InvalidMonthError } from "./monthlyReport.js";
+import { validateReceiptRequest } from "./receiptRequest.js";
 import { sendWebhook } from "./webhook.js";
 
 const app = Fastify({ logger: true });
@@ -25,22 +26,36 @@ Sentry.setupFastifyErrorHandler(app);
  */
 async function processReceiptJob(
   jobId: string,
-  imageUrl: string,
+  imageUrls: string[],
   webhookUrl: string,
 ): Promise<void> {
-  const ext = extname(new URL(imageUrl).pathname) || ".jpg";
-  const tempPath = join(tmpdir(), `receipt_${jobId}${ext}`);
+  const tempPaths = imageUrls.map((imageUrl, index) => {
+    const ext = extname(new URL(imageUrl).pathname) || ".jpg";
+    return join(tmpdir(), `receipt_${jobId}_${index}${ext}`);
+  });
 
   try {
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-      throw new Error(`Falha ao baixar imagem: ${response.status} ${response.statusText}`);
+    const downloadResults = await Promise.allSettled(
+      imageUrls.map(async (imageUrl, index) => {
+        const response = await fetch(imageUrl);
+        if (!response.ok) {
+          throw new Error(
+            `Falha ao baixar imagem ${index + 1}: ${response.status} ${response.statusText}`,
+          );
+        }
+
+        const buffer = await response.arrayBuffer();
+        await writeFile(tempPaths[index], Buffer.from(buffer));
+      }),
+    );
+    const failedDownload = downloadResults.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failedDownload) {
+      throw failedDownload.reason;
     }
 
-    const buffer = await response.arrayBuffer();
-    await writeFile(tempPath, Buffer.from(buffer));
-
-    const result = await processAndSave(tempPath);
+    const result = await processAndSave(tempPaths);
 
     await sendWebhook(webhookUrl, {
       jobId,
@@ -73,38 +88,21 @@ async function processReceiptJob(
       error: err instanceof Error ? err.message : String(err),
     });
   } finally {
-    await unlink(tempPath).catch(() => {});
+    await Promise.all(tempPaths.map((tempPath) => unlink(tempPath).catch(() => {})));
   }
 }
 
 app.post("/receipts", async (request, reply) => {
-  const body = request.body as Record<string, unknown>;
-  const imageUrl = body?.imageUrl;
-  const webhookUrl = body?.webhookUrl;
-
-  if (typeof imageUrl !== "string" || !imageUrl) {
-    return reply.status(400).send({ error: "imageUrl is required" });
-  }
-
-  if (typeof webhookUrl !== "string" || !webhookUrl) {
-    return reply.status(400).send({ error: "webhookUrl is required" });
-  }
-
-  try {
-    new URL(imageUrl);
-  } catch {
-    return reply.status(400).send({ error: "imageUrl is not a valid URL" });
-  }
-
-  try {
-    new URL(webhookUrl);
-  } catch {
-    return reply.status(400).send({ error: "webhookUrl is not a valid URL" });
+  const validation = validateReceiptRequest(
+    (request.body ?? {}) as Record<string, unknown>,
+  );
+  if (!validation.ok) {
+    return reply.status(400).send({ error: validation.error });
   }
 
   const jobId = randomUUID();
 
-  void processReceiptJob(jobId, imageUrl, webhookUrl);
+  void processReceiptJob(jobId, validation.imageUrls, validation.webhookUrl);
 
   return reply.status(202).send({ jobId, status: "accepted" });
 });
