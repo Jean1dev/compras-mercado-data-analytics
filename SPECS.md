@@ -8,7 +8,7 @@
 
 ## 1. Visão geral
 
-Sistema de backend em TypeScript que recebe o **caminho de uma imagem** de cupom fiscal de supermercado, extrai os dados dos produtos via visão computacional (LLM multimodal — Claude), classifica cada item por categoria e persiste no MongoDB.
+Sistema de backend em TypeScript que recebe o **caminho de uma imagem** de cupom fiscal de supermercado, extrai os dados dos produtos via visão computacional (LLM multimodal — Claude via LiteLLM), classifica cada item por categoria e persiste no MongoDB.
 
 **Objetivo de longo prazo:** acumular histórico de compras para:
 - analisar inflação pessoal ao longo do tempo;
@@ -24,8 +24,8 @@ Esta versão entrega a **ingestão** (imagem → dados estruturados → banco). 
 | Camada | Tecnologia | Versão |
 |---|---|---|
 | Runtime | Node.js (TypeScript, ESM, strict) | 20+ |
-| Orquestração de IA | LangChain.js (`langchain` + `@langchain/anthropic` + `@langchain/core`) | 0.3.x |
-| LLM | Claude `claude-sonnet-4-6` (Anthropic) | — |
+| Orquestração de IA | LangChain.js (`langchain` + `@langchain/openai` + `@langchain/core`) | 0.3.x |
+| LLM | Claude `anthropic/claude-sonnet-4-6` via LiteLLM proxy | — |
 | Banco de dados | MongoDB via Mongoose | 8.x |
 | Validação | Zod | 3.x |
 | Config | dotenv | 16.x |
@@ -39,15 +39,19 @@ Esta versão entrega a **ingestão** (imagem → dados estruturados → banco). 
 
 | Variável | Obrigatória | Descrição |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Sim | Chave da API da Anthropic. |
+| `LITELLM_BASE_URL` | Sim | URL base do proxy LiteLLM (ex: `https://.../v1`). |
+| `LITELLM_API_KEY` | Sim | Chave de autenticação do LiteLLM. |
+| `LLM_MODEL` | Não | Modelo a usar (default: `anthropic/claude-sonnet-4-6`). |
 | `MONGODB_URI` | Sim | String de conexão do MongoDB (ex: `mongodb://localhost:27017/compras-mercado`). |
 
-Ambas são validadas no início da execução; ausência interrompe o processo com mensagem clara e código de saída ≠ 0.
+> **BREAKING:** `ANTHROPIC_API_KEY` foi substituída por `LITELLM_BASE_URL` + `LITELLM_API_KEY`.
+
+As variáveis obrigatórias são validadas no início da execução; ausência interrompe o processo com mensagem clara e código de saída ≠ 0.
 
 ### Pré-requisitos
 
 - MongoDB acessível na URI configurada.
-- Chave de API válida.
+- Proxy LiteLLM acessível na URL configurada.
 
 ---
 
@@ -75,14 +79,14 @@ npm run dev /caminho/absoluto/para/foto_cupom.jpg
   ┌──────────┐    ┌─────────────────┐    ┌──────────────┐
   │  db.ts   │    │ extractReceipt  │    │   models/    │
   │ connect/ │    │ imagem→base64   │    │ Purchase     │
-  │ disconnect    │ →Claude→JSON    │    │ Item         │
+  │ disconnect    │ →LiteLLM→JSON   │    │ Item         │
   └──────────┘    │ →valida (Zod)   │    └──────────────┘
                   └─────────────────┘
 ```
 
 ### Sequência de execução (`index.ts`)
 
-1. Lê e valida `process.argv[2]` (caminho da imagem) e `ANTHROPIC_API_KEY`.
+1. Lê e valida `process.argv[2]` (caminho da imagem) e variáveis LiteLLM (`LITELLM_BASE_URL`, `LITELLM_API_KEY`).
 2. `connectDB()` — conecta ao MongoDB.
 3. `extractReceipt(path)` — extrai e valida os dados do cupom.
 4. Cria o documento `Purchase` (sem itens ainda) para obter o `_id`.
@@ -102,7 +106,7 @@ Caminho de arquivo de imagem.
 1. **Detecção de media type** pela extensão (`detectMediaType`); extensão não suportada → erro.
 2. **Leitura do arquivo** (`fs/promises.readFile`); falha de leitura → erro com o caminho.
 3. **Conversão para base64**.
-4. **Chamada ao Claude** via `ChatAnthropic`, com `HumanMessage` de conteúdo multimodal:
+4. **Chamada ao LLM** via `ChatOpenAI` (LiteLLM proxy), com `HumanMessage` de conteúdo multimodal:
    - bloco `text`: prompt de extração;
    - bloco `image_url`: `data:<mediaType>;base64,<dados>`.
 5. **Extração do texto** da resposta (`messageContentToText` — lida com string ou array de blocos).
@@ -122,9 +126,9 @@ Instrui o Claude a retornar **somente** JSON válido (sem markdown), com:
 - `null` para `storeCnpj`/`purchaseDate` quando ilegíveis.
 
 ### Parâmetros do modelo
-- `model: "claude-sonnet-4-6"`
-- `maxTokens: 4096`
-- `invocationKwargs: { top_p: undefined, top_k: undefined }` — **workaround** (ver §10).
+- `model`: `LLM_MODEL` ou default `anthropic/claude-sonnet-4-6`
+- `maxTokens: 8192`
+- `baseURL`: `LITELLM_BASE_URL`
 
 ---
 
@@ -200,7 +204,7 @@ Ambos os schemas usam `timestamps: true` → geram `createdAt` e `updatedAt`.
 | Situação | Comportamento |
 |---|---|
 | Sem caminho de imagem | Mensagem de uso, exit 1 |
-| `ANTHROPIC_API_KEY` ausente | Mensagem clara, exit 1 |
+| `LITELLM_BASE_URL` ou `LITELLM_API_KEY` ausente | Mensagem clara, exit 1 |
 | `MONGODB_URI` ausente | Erro lançado por `connectDB`, exit 1 |
 | Extensão de imagem não suportada | Erro com a extensão recebida |
 | Falha ao ler o arquivo | Erro com o caminho (preserva `cause`) |
@@ -211,9 +215,6 @@ Ambos os schemas usam `timestamps: true` → geram `createdAt` e `updatedAt`.
 ---
 
 ## 10. Pendências e dívidas técnicas conhecidas
-
-### Workaround do `top_p`/`top_k`
-O `@langchain/anthropic@0.3.34` é anterior ao modelo `claude-sonnet-4-6` e injeta `top_p: -1` / `top_k: -1` como sentinelas para modelos desconhecidos. A API rejeita `top_p: -1`. Mitigado via `invocationKwargs: { top_p: undefined, top_k: undefined }` (espalhado por último na montagem do request, omitido do JSON). **Remover** ao atualizar `@langchain/anthropic` para uma versão que reconheça o modelo.
 
 ### Vulnerabilidades de dependências
 `npm install` reporta vulnerabilidades transitivas (via `langchain`). Não tratadas para evitar `npm audit fix --force` (risco de breaking changes).
@@ -298,7 +299,7 @@ Campos do `MonthlyReport`: `month`, `range`, `totalSpent`, `purchaseCount`,
 | 1 | `npm install` | ✅ |
 | 2 | `npx tsc --noEmit` (strict) | ✅ exit 0 |
 | 3 | CLI sem args → mensagem de uso | ✅ exit 1 |
-| 4 | `ANTHROPIC_API_KEY` ausente → erro | ✅ exit 1 |
+| 4 | `LITELLM_BASE_URL` ou `LITELLM_API_KEY` ausente → erro | ✅ exit 1 |
 | 5 | Extração + persistência end-to-end (cupom real) | ✅ 10 itens persistidos |
 
 ---
@@ -311,7 +312,8 @@ Campos do `MonthlyReport`: `month`, `range`, `totalSpent`, `purchaseCount`,
 │   ├── index.ts            # entry point — orquestra o fluxo
 │   ├── server.ts           # servidor Fastify — POST /receipts (assíncrono), GET /reports/:month
 │   ├── webhook.ts          # envio do POST de callback (sendWebhook)
-│   ├── extractReceipt.ts   # lê imagem, chama Claude via LangChain, valida o JSON
+│   ├── extractReceipt.ts   # lê imagem, chama LLM via LiteLLM/LangChain, valida o JSON
+│   ├── llmEnv.ts           # validação das variáveis LiteLLM
 │   ├── processAndSave.ts   # extrai + persiste (Purchase + Item)
 │   ├── monthlyReport.ts    # agregação do relatório mensal
 │   ├── models/

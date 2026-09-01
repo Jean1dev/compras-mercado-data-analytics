@@ -3,6 +3,7 @@ import "./instrument.js";
 import "dotenv/config";
 import * as Sentry from "@sentry/node";
 import { connectDB, disconnectDB } from "./db.js";
+import { validateLlmEnv } from "./llmEnv.js";
 import { processAndSave } from "./processAndSave.js";
 import type { ExtractedReceipt } from "./types.js";
 
@@ -31,12 +32,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error(
-      "ANTHROPIC_API_KEY não definida. Configure-a no arquivo .env (veja .env.example).",
-    );
-    process.exit(1);
-  }
+  validateLlmEnv();
 
   await connectDB();
 
