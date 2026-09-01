@@ -9,15 +9,15 @@ export interface ProcessResult {
   itemCount: number;
 }
 
-export async function processAndSave(imagePath: string): Promise<ProcessResult> {
-  const receipt = await extractReceipt(imagePath);
+export async function processAndSave(imagePaths: string[]): Promise<ProcessResult> {
+  const receipt = await extractReceipt(imagePaths);
 
   const purchase = await Purchase.create({
     storeName: receipt.storeName,
     storeCnpj: receipt.storeCnpj ?? undefined,
     purchaseDate: receipt.purchaseDate ? new Date(receipt.purchaseDate) : new Date(),
     totalAmount: receipt.totalAmount,
-    imagePath,
+    imagePaths,
     items: [],
   });
 

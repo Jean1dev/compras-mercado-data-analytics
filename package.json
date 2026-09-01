@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx src/index.ts /home/user/Downloads/IMG_7452.JPEG",
     "serve": "tsx src/server.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
     "@langchain/anthropic": "^0.3.0",

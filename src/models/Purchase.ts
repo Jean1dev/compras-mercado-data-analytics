@@ -11,7 +11,17 @@ const purchaseSchema = new Schema(
     storeCnpj: { type: String }, // opcional
     purchaseDate: { type: Date, required: true },
     totalAmount: { type: Number, required: true },
-    imagePath: { type: String, required: true },
+    // Legado: documentos antigos podem conter somente este campo.
+    imagePath: { type: String },
+    imagePaths: {
+      type: [String],
+      validate: {
+        validator: function (this: { imagePath?: string }, paths: string[]) {
+          return paths.length > 0 || Boolean(this.imagePath);
+        },
+        message: "A compra deve conter imagePaths ou o imagePath legado",
+      },
+    },
     items: [{ type: Schema.Types.ObjectId, ref: "Item" }],
   },
   { timestamps: true },

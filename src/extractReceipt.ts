@@ -10,9 +10,11 @@ const MAX_TOKENS = 8192;
 const MAX_ATTEMPTS = 3;
 
 const EXTRACTION_PROMPT = `Você é um extrator de dados de cupons fiscais de supermercado brasileiros.
-Analise a imagem do cupom e preencha a ferramenta de extração com TODOS os itens legíveis.
+As imagens fornecidas pertencem à mesma compra e estão na ordem enviada pelo cliente. Elas podem ser páginas, trechos ou ângulos sobrepostos do mesmo cupom.
+Analise todas as imagens em conjunto e preencha a ferramenta de extração com TODOS os itens legíveis, retornando um único cupom.
 
 Regras:
+- Combine informações complementares entre as imagens e não duplique itens que apareçam em imagens sobrepostas.
 - Use SOMENTE uma destas categorias: "hortifruti", "proteína", "laticínios", "padaria", "bebidas", "limpeza", "higiene", "congelados", "mercearia", "outros".
 - Use ponto como separador decimal.
 - Se storeCnpj ou purchaseDate não forem legíveis, use null.
@@ -98,14 +100,19 @@ function createModel(): ChatAnthropic {
   });
 }
 
-function buildImageMessage(prompt: string, mediaType: string, base64: string): HumanMessage {
+interface EncodedImage {
+  mediaType: string;
+  base64: string;
+}
+
+function buildImageMessage(prompt: string, images: EncodedImage[]): HumanMessage {
   return new HumanMessage({
     content: [
-      { type: "text", text: prompt },
-      {
+      ...images.map(({ mediaType, base64 }) => ({
         type: "image_url",
         image_url: { url: `data:${mediaType};base64,${base64}` },
-      },
+      })),
+      { type: "text", text: prompt },
     ],
   });
 }
@@ -125,14 +132,13 @@ function isRetryableExtractionError(err: unknown): boolean {
 }
 
 async function extractWithStructuredOutput(
-  mediaType: string,
-  base64: string,
+  images: EncodedImage[],
 ): Promise<ExtractedReceipt> {
   const model = createModel();
   const structured = model.withStructuredOutput(extractedReceiptSchema, {
     name: "extract_receipt",
   });
-  const message = buildImageMessage(EXTRACTION_PROMPT, mediaType, base64);
+  const message = buildImageMessage(EXTRACTION_PROMPT, images);
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -156,33 +162,38 @@ async function extractWithStructuredOutput(
 }
 
 async function extractWithTextFallback(
-  mediaType: string,
-  base64: string,
+  images: EncodedImage[],
 ): Promise<ExtractedReceipt> {
   const model = createModel();
-  const message = buildImageMessage(FALLBACK_PROMPT, mediaType, base64);
+  const message = buildImageMessage(FALLBACK_PROMPT, images);
   const response = await model.invoke([message]);
   const rawText = messageContentToText(response.content);
   const parsed = parseJsonFromResponse(rawText);
   return extractedReceiptSchema.parse(parsed);
 }
 
-export async function extractReceipt(imagePath: string): Promise<ExtractedReceipt> {
-  const mediaType = detectMediaType(imagePath);
-
-  let buffer: Buffer;
-  try {
-    buffer = await readFile(imagePath);
-  } catch (err) {
-    throw new Error(
-      `Não foi possível ler a imagem em "${imagePath}". Verifique se o caminho está correto.`,
-      { cause: err },
-    );
+export async function extractReceipt(imagePaths: string[]): Promise<ExtractedReceipt> {
+  if (imagePaths.length === 0) {
+    throw new Error("Informe ao menos uma imagem para extração.");
   }
-  const base64 = buffer.toString("base64");
+
+  const images = await Promise.all(
+    imagePaths.map(async (imagePath): Promise<EncodedImage> => {
+      const mediaType = detectMediaType(imagePath);
+      try {
+        const buffer = await readFile(imagePath);
+        return { mediaType, base64: buffer.toString("base64") };
+      } catch (err) {
+        throw new Error(
+          `Não foi possível ler a imagem em "${imagePath}". Verifique se o caminho está correto.`,
+          { cause: err },
+        );
+      }
+    }),
+  );
 
   try {
-    return await extractWithStructuredOutput(mediaType, base64);
+    return await extractWithStructuredOutput(images);
   } catch (structuredErr) {
     console.warn(
       `⚠ Structured output esgotou retries; tentando fallback textual: ${
@@ -190,7 +201,7 @@ export async function extractReceipt(imagePath: string): Promise<ExtractedReceip
       }`,
     );
     try {
-      return await extractWithTextFallback(mediaType, base64);
+      return await extractWithTextFallback(images);
     } catch (fallbackErr) {
       throw new Error(
         `Falha ao extrair cupom após structured output e fallback textual. ` +

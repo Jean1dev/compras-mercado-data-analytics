@@ -48,17 +48,17 @@ e seus itens no MongoDB e imprime um resumo no console.
 
 ## Processamento de cupom via API HTTP (assíncrono + webhook)
 
-Suba o servidor e envie a imagem do cupom:
+Suba o servidor e envie as imagens do cupom na ordem em que devem ser analisadas:
 
 ```bash
 npm run serve
 curl -X POST http://localhost:3000/receipts \
   -H "Content-Type: application/json" \
-  -d '{"imageUrl": "https://exemplo.com/cupom.jpg", "webhookUrl": "https://exemplo.com/callback"}'
+  -d '{"imageUrls": ["https://exemplo.com/cupom-1.jpg", "https://exemplo.com/cupom-2.jpg"], "webhookUrl": "https://exemplo.com/callback"}'
 ```
 
 `POST /receipts` responde imediatamente com `202 Accepted` e `{ "jobId": "...", "status": "accepted" }`,
-sem esperar o processamento terminar. O download da imagem, a extração via Claude e a persistência
+sem esperar o processamento terminar. O download das imagens, a extração via Claude e a persistência
 no MongoDB acontecem em background; à medida que os dados ficam disponíveis, o servidor faz chamadas
 `POST` para o `webhookUrl` informado, uma por evento, sempre com `jobId`:
 
@@ -81,8 +81,10 @@ no MongoDB acontecem em background; à medida que os dados ficam disponíveis, o
 
 Em caso de sucesso, os eventos `storeName`, `totalAmount` e `itemCount` são enviados (nessa ordem),
 seguidos do `completed`. Em caso de erro, apenas o `failed` é enviado. Campos obrigatórios do corpo
-da requisição: `imageUrl` e `webhookUrl` (ambos devem ser URLs válidas). Requisição inválida retorna
-`400` de forma síncrona, antes de qualquer processamento.
+da requisição: `imageUrls` (array de 1 a 10 URLs) e `webhookUrl`. Todas as imagens são
+tratadas como partes da mesma compra e geram um único `Purchase`. Por compatibilidade, `imageUrl`
+continua aceito para uma única imagem; ele não pode ser enviado junto com `imageUrls`.
+Requisição inválida retorna `400` de forma síncrona, antes de qualquer processamento.
 
 ## Relatório mensal (API HTTP)
 
@@ -127,7 +129,8 @@ src/
 ## Modelo de dados
 
 **Purchase** (uma compra): `storeName`, `storeCnpj?`, `purchaseDate`, `totalAmount`,
-`imagePath`, `items[]` (refs para `Item`), `createdAt`, `updatedAt`.
+`imagePaths[]`, `items[]` (refs para `Item`), `createdAt`, `updatedAt`. O campo legado
+`imagePath` continua legível em documentos antigos.
 
 **Item** (cada produto): `purchaseId` (ref para `Purchase`), `rawName`,
 `normalizedName`, `category`, `unitPrice`, `quantity`, `unit`, `totalPrice`,
