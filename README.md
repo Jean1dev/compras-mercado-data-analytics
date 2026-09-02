@@ -1,12 +1,12 @@
 # compras-mercado-data-analytics
 
-Leitor de cupom fiscal: recebe o caminho de uma imagem de cupom de supermercado, extrai os produtos via Claude (visão computacional, usando LangChain.js), classifica cada item e persiste no MongoDB. O objetivo é acumular histórico de compras para analisar inflação pessoal, comparar preços entre estabelecimentos e identificar padrões de consumo.
+Leitor de cupom fiscal: recebe o caminho de uma imagem de cupom de supermercado, extrai os produtos via LLM multimodal (visão computacional, usando LangChain.js + LiteLLM), classifica cada item e persiste no MongoDB. O objetivo é acumular histórico de compras para analisar inflação pessoal, comparar preços entre estabelecimentos e identificar padrões de consumo.
 
 ## Stack
 
 - Node.js + TypeScript (strict, ESM)
-- [LangChain.js](https://js.langchain.com/) (`langchain` + `@langchain/anthropic`)
-- Claude (`claude-sonnet-4-6`) via Anthropic
+- [LangChain.js](https://js.langchain.com/) (`langchain` + `@langchain/openai`)
+- Claude (`anthropic/claude-sonnet-4-6`) via [LiteLLM](https://docs.litellm.ai/) proxy
 - MongoDB via Mongoose
 - Validação com Zod
 
@@ -14,7 +14,7 @@ Leitor de cupom fiscal: recebe o caminho de uma imagem de cupom de supermercado,
 
 - Node.js 20+
 - MongoDB rodando e acessível (local ou remoto)
-- Uma chave de API da Anthropic
+- Acesso ao proxy LiteLLM (`LITELLM_BASE_URL` + `LITELLM_API_KEY`)
 
 ## Instalação
 
@@ -31,9 +31,13 @@ cp .env.example .env
 ```
 
 ```dotenv
-ANTHROPIC_API_KEY=sua-chave-aqui
+LITELLM_BASE_URL=https://lite-llm-deploy-production.up.railway.app/v1
+LITELLM_API_KEY=sua-chave-aqui
+LLM_MODEL=anthropic/claude-sonnet-4-6
 MONGODB_URI=mongodb://localhost:27017/compras-mercado
 ```
+
+> **BREAKING (v0.2+):** `ANTHROPIC_API_KEY` não é mais usada. Migre para `LITELLM_BASE_URL` e `LITELLM_API_KEY`.
 
 ## Uso
 
@@ -43,7 +47,7 @@ npm run dev /caminho/absoluto/para/foto_cupom.jpg
 
 Formatos de imagem suportados: `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`.
 
-O comando lê a imagem, envia ao Claude, valida o JSON retornado, persiste a compra
+O comando lê a imagem, envia ao LLM via LiteLLM, valida o JSON retornado, persiste a compra
 e seus itens no MongoDB e imprime um resumo no console.
 
 ## Processamento de cupom via API HTTP (assíncrono + webhook)
@@ -58,7 +62,7 @@ curl -X POST http://localhost:3000/receipts \
 ```
 
 `POST /receipts` responde imediatamente com `202 Accepted` e `{ "jobId": "...", "status": "accepted" }`,
-sem esperar o processamento terminar. O download das imagens, a extração via Claude e a persistência
+sem esperar o processamento terminar. O download das imagens, a extração via LLM e a persistência
 no MongoDB acontecem em background; à medida que os dados ficam disponíveis, o servidor faz chamadas
 `POST` para o `webhookUrl` informado, uma por evento, sempre com `jobId`:
 
@@ -118,7 +122,8 @@ npm run build   # compila TypeScript para dist/
 ```
 src/
 ├── index.ts            # entry point — orquestra o fluxo
-├── extractReceipt.ts   # lê imagem, chama Claude via LangChain, valida o JSON
+├── extractReceipt.ts   # lê imagem, chama LLM via LiteLLM/LangChain, valida o JSON
+├── llmEnv.ts           # validação das variáveis LiteLLM
 ├── models/
 │   ├── Purchase.ts     # model Mongoose (uma compra = um cupom)
 │   └── Item.ts         # model Mongoose (cada produto)

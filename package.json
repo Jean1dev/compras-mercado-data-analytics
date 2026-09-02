@@ -1,7 +1,7 @@
 {
   "name": "compras-mercado-data-analytics",
   "version": "0.1.0",
-  "description": "Leitor de cupom fiscal: extrai itens de uma imagem via Claude (LangChain) e persiste no MongoDB para analise de inflacao pessoal.",
+  "description": "Leitor de cupom fiscal: extrai itens de uma imagem via LLM (LiteLLM + LangChain) e persiste no MongoDB para analise de inflacao pessoal.",
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts /home/user/Downloads/IMG_7452.JPEG",
@@ -10,7 +10,7 @@
     "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
-    "@langchain/anthropic": "^0.3.0",
+    "@langchain/openai": "^0.3.0",
     "@langchain/core": "^0.3.0",
     "@sentry/node": "^10.59.0",
     "dotenv": "^16.4.0",

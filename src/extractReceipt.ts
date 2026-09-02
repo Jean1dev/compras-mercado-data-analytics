@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage } from "@langchain/core/messages";
 import { jsonrepair } from "jsonrepair";
 import { extractedReceiptSchema, type ExtractedReceipt } from "./types.js";
 
-const MODEL = "claude-sonnet-4-6";
+const DEFAULT_MODEL = "anthropic/claude-sonnet-4-6";
 const MAX_TOKENS = 8192;
 const MAX_ATTEMPTS = 3;
 
@@ -92,11 +92,12 @@ function parseJsonFromResponse(raw: string): unknown {
   }
 }
 
-function createModel(): ChatAnthropic {
-  return new ChatAnthropic({
-    model: MODEL,
+function createModel(): ChatOpenAI {
+  return new ChatOpenAI({
+    model: process.env.LLM_MODEL ?? DEFAULT_MODEL,
+    apiKey: process.env.LITELLM_API_KEY,
     maxTokens: MAX_TOKENS,
-    invocationKwargs: { top_p: undefined, top_k: undefined },
+    configuration: { baseURL: process.env.LITELLM_BASE_URL },
   });
 }
 

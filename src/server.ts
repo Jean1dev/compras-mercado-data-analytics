@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import * as Sentry from "@sentry/node";
 import Fastify from "fastify";
 import { connectDB } from "./db.js";
+import { validateLlmEnv } from "./llmEnv.js";
 import { processAndSave } from "./processAndSave.js";
 import { generateMonthlyReport, InvalidMonthError } from "./monthlyReport.js";
 import { validateReceiptRequest } from "./receiptRequest.js";
@@ -122,10 +123,7 @@ app.get("/reports/:month", async (request, reply) => {
 });
 
 async function start(): Promise<void> {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error("ANTHROPIC_API_KEY não definida. Configure-a no arquivo .env.");
-    process.exit(1);
-  }
+  validateLlmEnv();
 
   await connectDB();
 
