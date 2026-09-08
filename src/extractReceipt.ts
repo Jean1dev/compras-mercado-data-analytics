@@ -92,8 +92,16 @@ function parseJsonFromResponse(raw: string): unknown {
   }
 }
 
+class ChatLiteLLM extends ChatOpenAI {
+  invocationParams(...args: Parameters<ChatOpenAI["invocationParams"]>) {
+    const params = super.invocationParams(...args);
+    delete (params as { top_p?: number }).top_p;
+    return params;
+  }
+}
+
 function createModel(): ChatOpenAI {
-  return new ChatOpenAI({
+  return new ChatLiteLLM({
     model: process.env.LLM_MODEL ?? DEFAULT_MODEL,
     apiKey: process.env.LITELLM_API_KEY,
     maxTokens: MAX_TOKENS,
