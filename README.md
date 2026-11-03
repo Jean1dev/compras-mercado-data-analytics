@@ -109,7 +109,20 @@ curl http://localhost:3000/reports/2026-06
 - `spendingByCategory` — gasto por categoria de produto (valor, % e nº de itens).
 
 Mês fora do formato `YYYY-MM` retorna `400`. Mês sem compras retorna o relatório
-com totais zerados.
+com totais zerados. Lojas com grafias diferentes do mesmo estabelecimento entram
+na mesma linha do ranking.
+
+## Corrigir lojas já salvas
+
+Compras novas já nascem ligadas à loja resolvida. Para corrigir as compras que já
+estão salvas:
+
+```bash
+npm run reconcile-stores
+```
+
+O comando grava o vínculo de cada compra e pode ser executado de novo. Sem compras
+novas, os vínculos permanecem.
 
 ## Build
 
@@ -133,7 +146,7 @@ src/
 
 ## Modelo de dados
 
-**Purchase** (uma compra): `storeName`, `storeCnpj?`, `purchaseDate`, `totalAmount`,
+**Purchase** (uma compra): `storeName`, `storeCnpj?`, `storeId?`, `purchaseDate`, `totalAmount`,
 `imagePaths[]`, `items[]` (refs para `Item`), `createdAt`, `updatedAt`. O campo legado
 `imagePath` continua legível em documentos antigos.
 

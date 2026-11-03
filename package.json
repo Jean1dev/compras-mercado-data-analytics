@@ -7,7 +7,8 @@
     "dev": "tsx src/index.ts /home/user/Downloads/IMG_7452.JPEG",
     "serve": "tsx src/server.ts",
     "build": "tsc",
-    "test": "tsx --test test/**/*.test.ts"
+    "test": "tsx --test test/**/*.test.ts",
+    "reconcile-stores": "tsx src/reconcileStores.ts"
   },
   "dependencies": {
     "@langchain/openai": "^0.3.0",

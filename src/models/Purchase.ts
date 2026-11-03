@@ -8,7 +8,8 @@ const { Schema, model, models } = mongoose;
 const purchaseSchema = new Schema(
   {
     storeName: { type: String, required: true },
-    storeCnpj: { type: String }, // opcional
+    storeCnpj: { type: String },
+    storeId: { type: Schema.Types.ObjectId, ref: "Store" },
     purchaseDate: { type: Date, required: true },
     totalAmount: { type: Number, required: true },
     // Legado: documentos antigos podem conter somente este campo.
