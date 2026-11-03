@@ -1,4 +1,5 @@
 import { Purchase } from "./models/Purchase.js";
+import { resolvePurchases, type PurchaseIdentity } from "./storeIdentity.js";
 
 /** Erro de mês fora do formato esperado (YYYY-MM). Mapeado para HTTP 400. */
 export class InvalidMonthError extends Error {
@@ -55,16 +56,63 @@ export function getMonthRange(month: string): { start: Date; end: Date } {
   return { start, end };
 }
 
-interface StoreAggregateRow {
-  _id: string;
-  total: number;
-  purchaseCount: number;
+export interface PurchaseForRanking extends PurchaseIdentity {
+  totalAmount: number;
 }
 
 interface CategoryAggregateRow {
   _id: string;
   total: number;
   itemCount: number;
+}
+
+export function rankStores(
+  purchases: PurchaseForRanking[],
+  month: string,
+): Pick<
+  MonthlyReport,
+  "totalSpent" | "purchaseCount" | "averageTicket" | "topStore" | "storeRanking"
+> {
+  const { start, end } = getMonthRange(month);
+  const resolved = resolvePurchases(purchases);
+  const storeById = new Map(resolved.stores.map((store) => [store.id, store]));
+  const assignmentByPurchase = new Map(
+    resolved.assignments.map((assignment) => [assignment.purchaseId, assignment.storeId]),
+  );
+  const totals = new Map<string, { total: number; count: number }>();
+
+  for (const purchase of purchases) {
+    const time = purchase.purchaseDate.getTime();
+    if (time < start.getTime() || time >= end.getTime()) continue;
+    const storeId = assignmentByPurchase.get(purchase.id);
+    if (!storeId) continue;
+    const row = totals.get(storeId) ?? { total: 0, count: 0 };
+    row.total += purchase.totalAmount;
+    row.count += 1;
+    totals.set(storeId, row);
+  }
+
+  const storeRanking: StoreSpending[] = [...totals.entries()]
+    .map(([storeId, row]) => ({
+      storeName: storeById.get(storeId)?.label ?? "",
+      total: round2(row.total),
+      purchaseCount: row.count,
+      averageTicket: round2(row.count ? row.total / row.count : 0),
+    }))
+    .sort(
+      (left, right) => right.total - left.total || left.storeName.localeCompare(right.storeName),
+    );
+
+  const totalSpent = round2([...totals.values()].reduce((sum, row) => sum + row.total, 0));
+  const purchaseCount = storeRanking.reduce((sum, row) => sum + row.purchaseCount, 0);
+
+  return {
+    totalSpent,
+    purchaseCount,
+    averageTicket: round2(purchaseCount ? totalSpent / purchaseCount : 0),
+    topStore: storeRanking[0] ?? null,
+    storeRanking,
+  };
 }
 
 /**
@@ -75,20 +123,8 @@ export async function generateMonthlyReport(month: string): Promise<MonthlyRepor
   const { start, end } = getMonthRange(month);
   const match = { purchaseDate: { $gte: start, $lt: end } };
 
-  // Roda as duas agregações em paralelo: nível de compra (lojas/totais) e
-  // nível de item (categorias), esta última via join Purchase → Item.
-  const [storeRows, categoryRows] = await Promise.all([
-    Purchase.aggregate<StoreAggregateRow>([
-      { $match: match },
-      {
-        $group: {
-          _id: "$storeName",
-          total: { $sum: "$totalAmount" },
-          purchaseCount: { $sum: 1 },
-        },
-      },
-      { $sort: { total: -1 } },
-    ]),
+  const [purchaseDocs, categoryRows] = await Promise.all([
+    Purchase.find().select("storeName storeCnpj purchaseDate totalAmount").lean(),
     Purchase.aggregate<CategoryAggregateRow>([
       { $match: match },
       {
@@ -111,15 +147,16 @@ export async function generateMonthlyReport(month: string): Promise<MonthlyRepor
     ]),
   ]);
 
-  const storeRanking: StoreSpending[] = storeRows.map((row) => ({
-    storeName: row._id,
-    total: round2(row.total),
-    purchaseCount: row.purchaseCount,
-    averageTicket: round2(row.purchaseCount ? row.total / row.purchaseCount : 0),
-  }));
-
-  const totalSpent = round2(storeRows.reduce((sum, row) => sum + row.total, 0));
-  const purchaseCount = storeRows.reduce((sum, row) => sum + row.purchaseCount, 0);
+  const ranked = rankStores(
+    purchaseDocs.map((doc) => ({
+      id: String(doc._id),
+      storeName: doc.storeName,
+      storeCnpj: doc.storeCnpj ?? null,
+      purchaseDate: new Date(doc.purchaseDate),
+      totalAmount: doc.totalAmount,
+    })),
+    month,
+  );
   const itemCount = categoryRows.reduce((sum, row) => sum + row.itemCount, 0);
 
   // Base do percentual: soma dos itens (pode divergir levemente de totalSpent
@@ -135,12 +172,8 @@ export async function generateMonthlyReport(month: string): Promise<MonthlyRepor
   return {
     month,
     range: { start: start.toISOString(), end: end.toISOString() },
-    totalSpent,
-    purchaseCount,
-    averageTicket: round2(purchaseCount ? totalSpent / purchaseCount : 0),
+    ...ranked,
     itemCount,
-    topStore: storeRanking[0] ?? null,
-    storeRanking,
     spendingByCategory,
   };
 }
